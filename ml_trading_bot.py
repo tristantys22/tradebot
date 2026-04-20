@@ -72,6 +72,7 @@ def broadcast_telegram(message: str) -> bool:
     Falls back to TELEGRAM_CHAT_ID if no subscribers exist.
     """
     chat_ids = load_subscribers()
+    print(f"[Debug] broadcast_telegram subscribers={chat_ids}")
 
     if not chat_ids:
         print("[Telegram] No subscribers found. Falling back to TELEGRAM_CHAT_ID.")
@@ -149,11 +150,10 @@ def get_updates(offset=None) -> list[dict]:
 
 
 def sync_subscribers():
-    """
-    Reads Telegram updates and syncs subscribers based on /start and /stop.
-    """
     offset = load_update_offset()
     updates = get_updates(offset=offset)
+
+    print(f"[Debug] offset={offset} updates_found={len(updates)}")
 
     if not updates:
         return
@@ -168,25 +168,33 @@ def sync_subscribers():
         chat = msg.get("chat", {})
         chat_id = chat.get("id")
 
+        print(f"[Debug] raw_text={msg.get('text')} chat_id={chat_id}")
+
         if not chat_id:
             continue
 
         chat_id = str(chat_id)
 
         if text == "/start":
+            print(f"[Debug] /start from {chat_id}")
             add_subscriber(chat_id)
+            print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram(
                 "You are subscribed to Tristan Tan's Amazing S&P 500 Machine Learning alerts. I love you.",
                 chat_id,
             )
 
         elif text == "/stop":
+            print(f"[Debug] /stop from {chat_id}")
             remove_subscriber(chat_id)
+            print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram("You have been unsubscribed from me. I hate you.", chat_id)
 
         elif text.startswith("/broadcast"):
+            print(f"[Debug] /broadcast from {chat_id}, admin={ADMIN_CHAT_ID}")
+
             if chat_id != ADMIN_CHAT_ID:
-                send_telegram("❌ You are not authorized to use this command.", chat_id)
+                send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
                 continue
 
             parts = msg.get("text", "").split(" ", 1)
@@ -195,11 +203,12 @@ def sync_subscribers():
                 continue
 
             broadcast_msg = parts[1].strip()
+            print(f"[Debug] broadcasting='{broadcast_msg}' subscribers={load_subscribers()}")
 
-            print(f"[Broadcast] Sending: {broadcast_msg}")
             send_telegram("📢 Broadcasting message...", chat_id)
             broadcast_telegram(f"📢 *Broadcast*\n\n{broadcast_msg}")
 
+    print(f"[Debug] saving next_offset={next_offset}")
     save_update_offset(next_offset)
 
 
