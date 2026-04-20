@@ -175,15 +175,17 @@ def sync_subscribers():
 
         if text == "/start":
             add_subscriber(chat_id)
-            send_telegram("You are subscribed to Tristan Tan's Amazing S&P 500 Machine Learning alerts. I love you.", chat_id)
+            send_telegram(
+                "You are subscribed to Tristan Tan's Amazing S&P 500 Machine Learning alerts. I love you.",
+                chat_id,
+            )
 
         elif text == "/stop":
             remove_subscriber(chat_id)
             send_telegram("You have been unsubscribed from me. I hate you.", chat_id)
 
-
         elif text.startswith("/broadcast"):
-            if str(chat_id) != ADMIN_CHAT_ID:
+            if chat_id != ADMIN_CHAT_ID:
                 send_telegram("❌ You are not authorized to use this command.", chat_id)
                 continue
 
@@ -194,11 +196,11 @@ def sync_subscribers():
 
             broadcast_msg = parts[1].strip()
 
-        print(f"[Broadcast] Sending: {broadcast_msg}")
-        send_telegram("📢 Broadcasting message...", chat_id)
-        broadcast_telegram(f"📢 *Broadcast*\n\n{broadcast_msg}")
+            print(f"[Broadcast] Sending: {broadcast_msg}")
+            send_telegram("📢 Broadcasting message...", chat_id)
+            broadcast_telegram(f"📢 *Broadcast*\n\n{broadcast_msg}")
 
-
+    save_update_offset(next_offset)
 
 
 def load_last_state() -> dict:
