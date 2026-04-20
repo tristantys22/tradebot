@@ -1,0 +1,6 @@
+.DS_Store
+.venv/
+last_signal_state.json
+subscribers.json
+telegram_updates_state.json
+__pycache__/
