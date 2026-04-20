@@ -119,9 +119,6 @@ def remove_subscriber(chat_id: str):
 
 
 def load_update_offset():
-    if UPDATES_STATE_FILE.exists():
-        with open(UPDATES_STATE_FILE) as f:
-            return json.load(f).get("offset")
     return None
 
 
