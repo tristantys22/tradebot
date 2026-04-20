@@ -187,35 +187,18 @@ def sync_subscribers():
                 send_telegram("❌ You are not authorized to use this command.", chat_id)
                 continue
 
-        parts = msg.get("text", "").split(" ", 1)
-        if len(parts) < 2 or not parts[1].strip():
-            send_telegram("Usage: /broadcast your message here", chat_id)
-            continue
+            parts = msg.get("text", "").split(" ", 1)
+            if len(parts) < 2 or not parts[1].strip():
+                send_telegram("Usage: /broadcast your message here", chat_id)
+                continue
 
-        broadcast_msg = parts[1].strip()
+            broadcast_msg = parts[1].strip()
 
+        print(f"[Broadcast] Sending: {broadcast_msg}")
         send_telegram("📢 Broadcasting message...", chat_id)
         broadcast_telegram(f"📢 *Broadcast*\n\n{broadcast_msg}")
 
 
-
-
-def broadcast_telegram(message: str) -> bool:
-    """
-    Send to all subscribers. If there are no subscribers yet, fall back to TELEGRAM_CHAT_ID.
-    """
-    chat_ids = load_subscribers()
-
-    if not chat_ids:
-        print("[Telegram] No subscribers found. Falling back to TELEGRAM_CHAT_ID.")
-        return send_telegram(message)
-
-    success = False
-    for chat_id in chat_ids:
-        sent = send_telegram(message, chat_id)
-        success = success or sent
-        time.sleep(0.2)
-    return success
 
 
 def load_last_state() -> dict:
