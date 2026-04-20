@@ -66,6 +66,25 @@ def send_telegram(message: str, chat_id: str = None) -> bool:
         print(f"[Telegram] ❌ Failed to send message to {target_chat_id}: {e}")
         return False
 
+def broadcast_telegram(message: str) -> bool:
+    """
+    Send a message to all subscribers.
+    Falls back to TELEGRAM_CHAT_ID if no subscribers exist.
+    """
+    chat_ids = load_subscribers()
+
+    if not chat_ids:
+        print("[Telegram] No subscribers found. Falling back to TELEGRAM_CHAT_ID.")
+        return send_telegram(message)
+
+    success = False
+    for chat_id in chat_ids:
+        sent = send_telegram(message, chat_id)
+        success = success or sent
+        time.sleep(0.2)
+
+    return success
+
 
 def load_subscribers() -> list[str]:
     if SUBSCRIBERS_FILE.exists():
