@@ -29,10 +29,32 @@ TRANSACTION_COST = 0.0005
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
 
-# State file to track last signal (so we only alert on changes)
-STATE_FILE = Path(__file__).parent / "last_signal_state.json"
-SUBSCRIBERS_FILE = Path(__file__).parent / "subscribers.json"
-UPDATES_STATE_FILE = Path(__file__).parent / "telegram_updates_state.json"
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+
+def sb_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates",
+    }
+
+def sb_get(key: str):
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/bot_state?key=eq.{key}&select=value",
+        headers=sb_headers(), timeout=10
+    )
+    data = r.json()
+    return data[0]["value"] if data else None
+
+def sb_set(key: str, value: str):
+    requests.post(
+        f"{SUPABASE_URL}/rest/v1/bot_state",
+        headers=sb_headers(),
+        json={"key": key, "value": value},
+        timeout=10
+    )
 
 
 # =========================
@@ -88,17 +110,13 @@ def broadcast_telegram(message: str) -> bool:
 
 
 def load_subscribers() -> list[str]:
-    if SUBSCRIBERS_FILE.exists():
-        with open(SUBSCRIBERS_FILE) as f:
-            data = json.load(f)
-            return [str(x) for x in data]
-    return []
+    val = sb_get("subscribers")
+    return json.loads(val) if val else []
 
 
 def save_subscribers(chat_ids: list[str]):
-    unique_chat_ids = sorted(list(set(str(cid) for cid in chat_ids)))
-    with open(SUBSCRIBERS_FILE, "w") as f:
-        json.dump(unique_chat_ids, f, indent=2)
+    unique = sorted(set(str(c) for c in chat_ids))
+    sb_set("subscribers", json.dumps(unique))
 
 
 def add_subscriber(chat_id: str):
@@ -119,12 +137,12 @@ def remove_subscriber(chat_id: str):
 
 
 def load_update_offset():
-    return None
+    val = sb_get("update_offset")
+    return int(val) if val else None
 
 
 def save_update_offset(offset: int):
-    with open(UPDATES_STATE_FILE, "w") as f:
-        json.dump({"offset": offset}, f)
+    sb_set("update_offset", str(offset))
 
 
 def get_updates(offset=None) -> list[dict]:
@@ -210,19 +228,20 @@ def sync_subscribers():
 
 
 def load_last_state() -> dict:
-    if STATE_FILE.exists():
-        with open(STATE_FILE) as f:
-            return json.load(f)
-    return {"signal": None, "date": None, "prob": None}
+    val = sb_get("last_signal_state")
+    return json.loads(val) if val else {"signal": None, "date": None, "prob": None}
 
 
 def save_state(signal: int, prob: float):
-    with open(STATE_FILE, "w") as f:
-        json.dump({
-            "signal": signal,
-            "date": str(date.today()),
-            "prob": round(prob, 4),
-        }, f)
+    sb_set("last_signal_state", json.dumps({
+        "signal": signal,
+        "date": str(date.today()),
+        "prob": round(prob, 4),
+    }))
+
+
+
+
 
 
 # =========================
