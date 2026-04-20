@@ -1,0 +1,34 @@
+
+==================================================
+  SPY ML Signal Bot  |  2026-04-20 21:07:08
+==================================================
+
+[1/4] Downloading data...
+[2/4] Engineering features...
+[3/4] Training model...
+      Train: 2015-03-16 → 2022-12-12 (1952 rows)
+      Test:  2022-12-13 → 2026-04-16 (837 rows)
+
+[4/4] Generating today's signal...
+
+  ┌─────────────────────────────┐
+  │  Signal:  STAY OUT 🔴          │
+  │  Prob:    34.1%                │
+  │  RSI:     96.8                 │
+  │  Close:   $710.14              │
+  └─────────────────────────────┘
+[Telegram] ⚠️  Bot token not configured — skipping send.
+[Telegram] Message would have been:
+
+📊 *SPY Daily Signal — 2026-04-20*
+
+Signal:  *STAY OUT 🔴*
+Confidence:  `34.1%`
+
+📌 *Key Indicators*
+Close Price:     `$710.14`
+RSI (14):        `96.8`
+BB Z-Score:      `1.91`
+vs SMA-20:       `+6.53%`
+
+_Model threshold: 55% | Act at next day's open_
