@@ -583,7 +583,7 @@ def run_pipeline(backtest_mode: bool = False, force_notify: bool = False):
     if signal_changed or force_notify or not already_alerted_today:
         msg = build_telegram_message(sig, prev_state)
         broadcast_telegram(msg)
-        save_state(sig["signal"], sig["prob"])
+        save_state(sig["signal"], sig["prob"],sig)
     else:
         print(f"\n[Telegram] Signal unchanged ({sig['signal_label']}) — no alert sent.")
 
