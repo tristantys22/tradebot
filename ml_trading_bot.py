@@ -163,6 +163,42 @@ def get_updates(offset=None) -> list[dict]:
         print(f"[Telegram] ❌ Failed to fetch updates: {e}")
         return []
 
+def save_prediction(sig: dict):
+    """Append a prediction to the history log in Supabase."""
+    history = load_prediction_history()
+    history.append({
+        "date": sig["date"],
+        "signal": sig["signal_label"],
+        "prob": sig["prob"],
+        "close": sig["close"],
+    })
+    history = history[-30:]  # keep last 30
+    sb_set("prediction_history", json.dumps(history))
+
+
+def load_prediction_history() -> list:
+    val = sb_get("prediction_history")
+    return json.loads(val) if val else []
+
+
+def calculate_accuracy() -> str:
+    history = load_prediction_history()
+    if len(history) < 2:
+        return "Not enough data yet — need at least 2 predictions."
+
+    correct = 0
+    total = 0
+    for i in range(len(history) - 1):
+        current = history[i]
+        next_entry = history[i + 1]
+        predicted_up = current["signal"] == "BUY 📈"
+        actually_up = next_entry["close"] > current["close"]
+        if predicted_up == actually_up:
+            correct += 1
+        total += 1
+
+    pct = (correct / total) * 100
+    return f"🎯 *Bot Accuracy*\n\nCorrect: {correct}/{total} predictions\nAccuracy: `{pct:.1f}%`"
 
 def sync_subscribers():
     offset = load_update_offset()
@@ -195,7 +231,12 @@ def sync_subscribers():
             add_subscriber(chat_id)
             print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram(
-                "You are subscribed to Tristan Tan's Amazing S&P 500 Machine Learning alerts. I love you.",
+                "✅ *Subscribed to Tristan's SPY ML Bot!*\n\n"
+                "📋 *Available Commands:*\n"
+                "/start — Subscribe to daily alerts\n"
+                "/stop — Unsubscribe from alerts\n"
+                "/history — View the last 5 predictions\n"
+                "/accuracy — See the bot's prediction accuracy\n",
                 chat_id,
             )
 
@@ -204,6 +245,21 @@ def sync_subscribers():
             remove_subscriber(chat_id)
             print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram("You have been unsubscribed from me. I hate you.", chat_id)
+
+
+        elif text == "/history":
+            history = load_prediction_history()
+            if not history:
+                send_telegram("No predictions recorded yet.", chat_id)
+            else:
+                lines = ["📅 *Last Predictions:*\n"]
+                for p in history[-5:][::-1]:
+                    lines.append(f"`{p['date']}` — {p['signal']} (`{p['prob']:.1%}`  ${p['close']})")
+                send_telegram("\n".join(lines), chat_id)
+
+        elif text == "/accuracy":
+            msg = calculate_accuracy()
+            send_telegram(msg, chat_id)
 
         elif text == "/force":
             print(f"[Debug] /force from {chat_id}, admin={ADMIN_CHAT_ID}")
@@ -255,12 +311,14 @@ def load_last_state() -> dict:
     return json.loads(val) if val else {"signal": None, "date": None, "prob": None}
 
 
-def save_state(signal: int, prob: float):
+def save_state(signal: int, prob: float, sig: dict = None):
     sb_set("last_signal_state", json.dumps({
         "signal": signal,
         "date": str(date.today()),
         "prob": round(prob, 4),
     }))
+    if sig:
+        save_prediction(sig)
 
 
 
