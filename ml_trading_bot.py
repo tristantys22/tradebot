@@ -248,6 +248,8 @@ def sync_subscribers():
     save_update_offset(next_offset)
 
 
+
+
 def load_last_state() -> dict:
     val = sb_get("last_signal_state")
     return json.loads(val) if val else {"signal": None, "date": None, "prob": None}
