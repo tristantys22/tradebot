@@ -214,13 +214,36 @@ def sync_subscribers():
 
     for upd in updates:
         next_offset = max(next_offset, upd["update_id"] + 1)
-
         msg = upd.get("message", {})
         text = (msg.get("text") or "").strip().lower()
         chat = msg.get("chat", {})
         chat_id = chat.get("id")
-
         print(f"[Debug] raw_text={msg.get('text')} chat_id={chat_id}")
+
+        # Auto-subscribe when bot is added to a group
+        my_chat_member = upd.get("my_chat_member", {})
+        if my_chat_member:
+            new_status = my_chat_member.get("new_chat_member", {}).get("status")
+            group_chat = my_chat_member.get("chat", {})
+            group_id = str(group_chat.get("id", ""))
+            group_name = group_chat.get("title", "this group")
+
+            if new_status == "member" and group_id:
+                print(f"[Debug] Bot added to group {group_name} ({group_id})")
+                add_subscriber(group_id)
+                send_telegram(
+                    f"👋 Thanks for adding me to *{group_name}*!\n\n"
+                    "I'll send daily SPY signals here automatically.\n\n"
+                    "📋 *Commands:*\n"
+                    "/start — Subscribe\n"
+                    "/stop — Unsubscribe\n"
+                    "/history — Last 5 predictions\n"
+                    "/accuracy — Bot accuracy",
+                    group_id,
+                )
+            elif new_status in ("kicked", "left") and group_id:
+                print(f"[Debug] Bot removed from group {group_name} ({group_id})")
+                remove_subscriber(group_id)
 
         if not chat_id:
             continue
@@ -613,6 +636,7 @@ if __name__ == "__main__":
         schedule.every().thursday.at("13:00").do(run_pipeline)
         schedule.every().friday.at("13:00").do(run_pipeline)
 
+        setup_allowed_updates()  # call once at startup
         while True:
             schedule.run_pending()
             sync_subscribers()
