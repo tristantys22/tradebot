@@ -205,6 +205,27 @@ def sync_subscribers():
             print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram("You have been unsubscribed from me. I hate you.", chat_id)
 
+        elif text == "/force":
+            print(f"[Debug] /force from {chat_id}, admin={ADMIN_CHAT_ID}")
+
+            if chat_id != ADMIN_CHAT_ID:
+                send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
+                continue
+
+        send_telegram("⚡ Forcing prediction...", chat_id)
+        # Re-run the signal generation and broadcast
+        from sklearn.ensemble import RandomForestClassifier
+        df = download_data(TICKER, START_DATE, END_DATE)
+        df = add_features(df)
+        model_df = df.dropna(subset=FEATURE_COLS + ["target", "future_ret_1d"]).copy()
+        train_df, _ = time_split(model_df, TRAIN_SIZE)
+        model = train_model(train_df)
+        sig = generate_signal(model, df)
+        prev_state = load_last_state()
+        msg = build_telegram_message(sig, prev_state)
+        broadcast_telegram(msg)
+        save_state(sig["signal"], sig["prob"])
+
         elif text.startswith("/broadcast"):
             print(f"[Debug] /broadcast from {chat_id}, admin={ADMIN_CHAT_ID}")
 
