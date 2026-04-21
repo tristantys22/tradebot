@@ -9,6 +9,7 @@ import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
+import schedule
 from datetime import datetime, date
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
@@ -600,4 +601,19 @@ if __name__ == "__main__":
     parser.add_argument("--force",    action="store_true", help="Force Telegram alert even if signal unchanged")
     args = parser.parse_args()
 
-    run_pipeline(backtest_mode=args.backtest, force_notify=args.force)
+    if args.backtest:
+        run_pipeline(backtest_mode=True)
+    elif args.force:
+        run_pipeline(force_notify=True)
+    else:
+        print("Scheduler started. Will run pipeline at 21:00 SGT (13:00 UTC) on weekdays.")
+        schedule.every().monday.at("13:00").do(run_pipeline)
+        schedule.every().tuesday.at("13:00").do(run_pipeline)
+        schedule.every().wednesday.at("13:00").do(run_pipeline)
+        schedule.every().thursday.at("13:00").do(run_pipeline)
+        schedule.every().friday.at("13:00").do(run_pipeline)
+
+        while True:
+            schedule.run_pending()
+            sync_subscribers()
+            time.sleep(5)
