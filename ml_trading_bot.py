@@ -643,7 +643,7 @@ if __name__ == "__main__":
                 today = str(now.date())
     
                 # 13:00 UTC = 21:00 SGT
-                if now.hour == 13 and 30 <= now.minute <= 45:
+                if now.hour == 13:
                     if get_last_run_date() != today:
                         print("[Scheduler] Running forced daily pipeline...")
                         run_pipeline(force_notify=True)
