@@ -629,15 +629,33 @@ if __name__ == "__main__":
     elif args.force:
         run_pipeline(force_notify=True)
     else:
-        print("Scheduler started. Will run pipeline at 21:00 SGT (13:00 UTC) on weekdays.")
-        schedule.every().monday.at("13:00").do(run_pipeline)
-        schedule.every().tuesday.at("13:00").do(run_pipeline)
-        schedule.every().wednesday.at("13:00").do(run_pipeline)
-        schedule.every().thursday.at("13:00").do(run_pipeline)
-        schedule.every().friday.at("13:00").do(run_pipeline)
-
-        setup_allowed_updates()  # call once at startup
+        print("Bot started. Running continuous loop with time check...")
+    
+        def get_last_run_date():
+            return sb_get("last_run_date")
+    
+        def set_last_run_date(d):
+            sb_set("last_run_date", d)
+    
         while True:
-            schedule.run_pending()
-            sync_subscribers()
-            time.sleep(5)
+            try:
+                now = datetime.utcnow()
+                today = str(now.date())
+    
+                # 13:00 UTC = 21:00 SGT
+                if now.hour == 13 and 30 <= now.minute <= 45:
+                    if get_last_run_date() != today:
+                        print("[Scheduler] Running forced daily pipeline...")
+                        run_pipeline(force_notify=True)
+                        set_last_run_date(today)
+                    else:
+                        print(f"[Scheduler] Already ran today ({today})")
+    
+                # Always process Telegram commands
+                sync_subscribers()
+    
+                time.sleep(10)
+    
+            except Exception as e:
+                print(f"[Main Loop Error] {e}")
+                time.sleep(5)
