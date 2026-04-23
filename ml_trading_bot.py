@@ -50,12 +50,19 @@ def sb_get(key: str):
     return data[0]["value"] if data else None
 
 def sb_set(key: str, value: str):
-    requests.post(
-        f"{SUPABASE_URL}/rest/v1/bot_state",
+    url = f"{SUPABASE_URL}/rest/v1/bot_state"
+
+    res = requests.post(
+        url,
         headers=sb_headers(),
         json={"key": key, "value": value},
         timeout=10
     )
+
+    print(f"[Supabase WRITE] key={key} status={res.status_code} response={res.text}")
+
+    if res.status_code >= 300:
+        print(f"[Supabase ERROR] Failed writing key={key}")
 
 
 # =========================
