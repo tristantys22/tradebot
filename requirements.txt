@@ -1,6 +1,7 @@
-pandas
-numpy
 yfinance
 scikit-learn
+pandas
+numpy
 requests
-schedule
+lightgbm
+pandas-datareader
