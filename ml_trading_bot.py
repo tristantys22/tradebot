@@ -716,10 +716,12 @@ def run_pipeline(backtest_mode: bool = False, force_notify: bool = False):
     signal_changed = prev_state["signal"] != sig["signal"]
     already_alerted_today = prev_state["date"] == str(date.today())
 
+    # Always save prediction so /history always has data
+    save_state(sig["signal"], sig["prob"], sig)
+
     if signal_changed or force_notify or not already_alerted_today:
         msg = build_telegram_message(sig, prev_state)
         broadcast_telegram(msg)
-        save_state(sig["signal"], sig["prob"], sig)
     else:
         print(f"\n[Telegram] Signal unchanged ({sig['signal_label']}) — no alert sent.")
 
