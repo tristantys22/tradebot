@@ -9,7 +9,7 @@ import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import lightgbm as lgb
+import xgboost as xgb
 from datetime import datetime, date
 from sklearn.metrics import classification_report
 from pathlib import Path
@@ -511,22 +511,25 @@ def time_split(df: pd.DataFrame, train_size: float = 0.7):
 # =========================
 # MODEL — LightGBM
 # =========================
-def train_model(train_df: pd.DataFrame) -> lgb.LGBMClassifier:
+def train_model(train_df: pd.DataFrame) -> xgb.XGBClassifier:
     """
-    LightGBM — gradient boosting that outperforms Random Forest on
-    tabular financial data. class_weight='balanced' fixes the STAY OUT bias
-    by giving equal importance to BUY and STAY OUT training examples.
+    XGBoost — gradient boosting that outperforms Random Forest on
+    tabular financial data. scale_pos_weight fixes the STAY OUT bias
+    by balancing BUY and STAY OUT training examples.
     """
-    model = lgb.LGBMClassifier(
+    n_neg = (train_df["target"] == 0).sum()
+    n_pos = (train_df["target"] == 1).sum()
+    scale = n_neg / n_pos if n_pos > 0 else 1.0
+
+    model = xgb.XGBClassifier(
         n_estimators=500,
         learning_rate=0.03,
         max_depth=5,
-        num_leaves=31,
-        min_child_samples=20,
-        class_weight="balanced",
+        scale_pos_weight=scale,
         random_state=42,
         n_jobs=-1,
-        verbose=-1,
+        verbosity=0,
+        eval_metric="logloss",
     )
     # Only use columns that exist and have actual data (graceful macro fallback)
     available_cols = [
@@ -586,7 +589,7 @@ def print_summary(bt):
 # =========================
 # SIGNAL GENERATION
 # =========================
-def generate_signal(model: lgb.LGBMClassifier, df: pd.DataFrame) -> dict:
+def generate_signal(model: xgb.XGBClassifier, df: pd.DataFrame) -> dict:
     """
     Generate a 5-day outlook signal from the latest market data.
     Applies a hard regime filter before trusting the model output.
@@ -647,7 +650,7 @@ def build_telegram_message(sig: dict, prev_state: dict) -> str:
         f"Yield Spread:    {spread_str}",
         f"{regime_note}",
         f"",
-        f"_Model: LightGBM | Target: 5-day return | Threshold: {PROB_THRESHOLD:.0%}_",
+        f"_Model: XGBoost | Target: 5-day return | Threshold: {PROB_THRESHOLD:.0%}_",
     ]
     return "\n".join(lines)
 
@@ -672,7 +675,7 @@ def run_pipeline(backtest_mode: bool = False, force_notify: bool = False):
     df = add_features(df, vix=vix, spread=spread)
     model_df = df.dropna(subset=["target", "future_ret_5d"]).copy()
 
-    print("[3/4] Training LightGBM model...")
+    print("[3/4] Training XGBoost model...")
     train_df, test_df = time_split(model_df, TRAIN_SIZE)
     print(f"      Train: {train_df.index.min().date()} → {train_df.index.max().date()} ({len(train_df)} rows)")
     print(f"      Test:  {test_df.index.min().date()} → {test_df.index.max().date()} ({len(test_df)} rows)")
