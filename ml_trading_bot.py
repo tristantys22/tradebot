@@ -9,9 +9,8 @@ import requests
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import schedule
+import lightgbm as lgb
 from datetime import datetime, date
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
 from pathlib import Path
 
@@ -23,7 +22,7 @@ START_DATE = "2015-01-01"
 END_DATE = None
 TRAIN_SIZE = 0.7
 INITIAL_CAPITAL = 10_000
-PROB_THRESHOLD = 0.55
+PROB_THRESHOLD = 0.50        # lowered from 0.55 — matches SPY's natural base rate
 TRANSACTION_COST = 0.0005
 
 # Telegram config — fill these in after creating your bot (see README)
@@ -51,16 +50,13 @@ def sb_get(key: str):
 
 def sb_set(key: str, value: str):
     url = f"{SUPABASE_URL}/rest/v1/bot_state"
-
     res = requests.post(
         url,
         headers=sb_headers(),
         json={"key": key, "value": value},
         timeout=10
     )
-
     print(f"[Supabase WRITE] key={key} status={res.status_code} response={res.text}")
-
     if res.status_code >= 300:
         print(f"[Supabase ERROR] Failed writing key={key}")
 
@@ -96,11 +92,9 @@ def send_telegram(message: str, chat_id: str = None) -> bool:
         print(f"[Telegram] ❌ Failed to send message to {target_chat_id}: {e}")
         return False
 
+
 def broadcast_telegram(message: str) -> bool:
-    """
-    Send a message to all subscribers.
-    Falls back to TELEGRAM_CHAT_ID if no subscribers exist.
-    """
+    """Send a message to all subscribers. Falls back to TELEGRAM_CHAT_ID if none."""
     chat_ids = load_subscribers()
     print(f"[Debug] broadcast_telegram subscribers={chat_ids}")
 
@@ -113,7 +107,6 @@ def broadcast_telegram(message: str) -> bool:
         sent = send_telegram(message, chat_id)
         success = success or sent
         time.sleep(0.2)
-
     return success
 
 
@@ -156,20 +149,18 @@ def save_update_offset(offset: int):
 def get_updates(offset=None) -> list[dict]:
     if not TELEGRAM_BOT_TOKEN:
         return []
-
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
     params = {"timeout": 10}
     if offset is not None:
         params["offset"] = offset
-
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        data = r.json()
-        return data.get("result", [])
+        return r.json().get("result", [])
     except Exception as e:
         print(f"[Telegram] ❌ Failed to fetch updates: {e}")
         return []
+
 
 def save_prediction(sig: dict):
     """Append a prediction to the history log in Supabase."""
@@ -180,7 +171,7 @@ def save_prediction(sig: dict):
         "prob": sig["prob"],
         "close": sig["close"],
     })
-    history = history[-30:]  # keep last 30
+    history = history[-30:]
     sb_set("prediction_history", json.dumps(history))
 
 
@@ -193,7 +184,6 @@ def calculate_accuracy() -> str:
     history = load_prediction_history()
     if len(history) < 2:
         return "Not enough data yet — need at least 2 predictions."
-
     correct = 0
     total = 0
     for i in range(len(history) - 1):
@@ -204,16 +194,14 @@ def calculate_accuracy() -> str:
         if predicted_up == actually_up:
             correct += 1
         total += 1
-
     pct = (correct / total) * 100
     return f"🎯 *Bot Accuracy*\n\nCorrect: {correct}/{total} predictions\nAccuracy: `{pct:.1f}%`"
+
 
 def sync_subscribers():
     offset = load_update_offset()
     updates = get_updates(offset=offset)
-
     print(f"[Debug] offset={offset} updates_found={len(updates)}")
-
     if not updates:
         return
 
@@ -227,14 +215,12 @@ def sync_subscribers():
         chat_id = chat.get("id")
         print(f"[Debug] raw_text={msg.get('text')} chat_id={chat_id}")
 
-        # Auto-subscribe when bot is added to a group
         my_chat_member = upd.get("my_chat_member", {})
         if my_chat_member:
             new_status = my_chat_member.get("new_chat_member", {}).get("status")
             group_chat = my_chat_member.get("chat", {})
             group_id = str(group_chat.get("id", ""))
             group_name = group_chat.get("title", "this group")
-
             if new_status == "member" and group_id:
                 print(f"[Debug] Bot added to group {group_name} ({group_id})")
                 add_subscriber(group_id)
@@ -254,13 +240,10 @@ def sync_subscribers():
 
         if not chat_id:
             continue
-
         chat_id = str(chat_id)
 
         if text == "/start":
-            print(f"[Debug] /start from {chat_id}")
             add_subscriber(chat_id)
-            print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram(
                 "✅ *Subscribed to Tristan's SPY ML Bot!*\n\n"
                 "📋 *Available Commands:*\n"
@@ -272,11 +255,8 @@ def sync_subscribers():
             )
 
         elif text == "/stop":
-            print(f"[Debug] /stop from {chat_id}")
             remove_subscriber(chat_id)
-            print(f"[Debug] subscribers_now={load_subscribers()}")
             send_telegram("You have been unsubscribed from me. I hate you.", chat_id)
-
 
         elif text == "/history":
             history = load_prediction_history()
@@ -289,52 +269,38 @@ def sync_subscribers():
                 send_telegram("\n".join(lines), chat_id)
 
         elif text == "/accuracy":
-            msg = calculate_accuracy()
-            send_telegram(msg, chat_id)
+            send_telegram(calculate_accuracy(), chat_id)
 
         elif text == "/force":
-            print(f"[Debug] /force from {chat_id}, admin={ADMIN_CHAT_ID}")
-
             if chat_id != ADMIN_CHAT_ID:
                 send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
                 continue
-
             send_telegram("⚡ Forcing prediction...", chat_id)
-            # Re-run the signal generation and broadcast
-            from sklearn.ensemble import RandomForestClassifier
             df = download_data(TICKER, START_DATE, END_DATE)
-            df = add_features(df)
-            model_df = df.dropna(subset=FEATURE_COLS + ["target", "future_ret_1d"]).copy()
+            vix, spread = download_macro(START_DATE, END_DATE)
+            df = add_features(df, vix=vix, spread=spread)
+            model_df = df.dropna(subset=["target", "future_ret_5d"]).copy()
             train_df, _ = time_split(model_df, TRAIN_SIZE)
             model = train_model(train_df)
             sig = generate_signal(model, df)
             prev_state = load_last_state()
-            msg = build_telegram_message(sig, prev_state)
-            broadcast_telegram(msg)
-            save_state(sig["signal"], sig["prob"])
+            broadcast_telegram(build_telegram_message(sig, prev_state))
+            save_state(sig["signal"], sig["prob"], sig)
 
         elif text.startswith("/broadcast"):
-            print(f"[Debug] /broadcast from {chat_id}, admin={ADMIN_CHAT_ID}")
-
             if chat_id != ADMIN_CHAT_ID:
                 send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
                 continue
-
             parts = msg.get("text", "").split(" ", 1)
             if len(parts) < 2 or not parts[1].strip():
                 send_telegram("Usage: /broadcast your message here", chat_id)
                 continue
-
             broadcast_msg = parts[1].strip()
-            print(f"[Debug] broadcasting='{broadcast_msg}' subscribers={load_subscribers()}")
-
             send_telegram("📢 Broadcasting message...", chat_id)
             broadcast_telegram(f"📢 *Broadcast*\n\n{broadcast_msg}")
 
     print(f"[Debug] saving next_offset={next_offset}")
     save_update_offset(next_offset)
-
-
 
 
 def load_last_state() -> dict:
@@ -352,10 +318,6 @@ def save_state(signal: int, prob: float, sig: dict = None):
         save_prediction(sig)
 
 
-
-
-
-
 # =========================
 # DATA
 # =========================
@@ -371,6 +333,36 @@ def download_data(ticker: str, start: str, end: str = None) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing expected columns: {missing}")
     return df[["open", "high", "low", "close", "volume"]].copy()
+
+
+def download_macro(start: str, end: str = None) -> tuple:
+    """
+    Download VIX and US Treasury yield spread (10Y - 2Y) as macro features.
+    Returns (vix_df, spread_df) — either can be None if download fails.
+    """
+    # VIX
+    try:
+        vix = yf.download("^VIX", start=start, end=end, auto_adjust=True, progress=False)
+        if isinstance(vix.columns, pd.MultiIndex):
+            vix.columns = vix.columns.get_level_values(0)
+        vix = vix[["Close"]].rename(columns={"Close": "vix"})
+        print("[Macro] ✅ VIX downloaded.")
+    except Exception as e:
+        print(f"[Macro] ⚠️  VIX download failed: {e}")
+        vix = None
+
+    # Yield Spread (10Y - 2Y) via FRED
+    try:
+        import pandas_datareader as pdr
+        t10 = pdr.get_data_fred("DGS10", start=start)
+        t2  = pdr.get_data_fred("DGS2",  start=start)
+        spread = (t10 - t2).rename(columns={"DGS10": "yield_spread"})
+        print("[Macro] ✅ Yield spread downloaded.")
+    except Exception as e:
+        print(f"[Macro] ⚠️  Yield spread download failed: {e}")
+        spread = None
+
+    return vix, spread
 
 
 # =========================
@@ -396,19 +388,30 @@ def compute_atr(df: pd.DataFrame, window: int = 14) -> pd.Series:
     return tr.rolling(window).mean()
 
 
-def add_features(df: pd.DataFrame) -> pd.DataFrame:
+def add_features(df: pd.DataFrame, vix=None, spread=None) -> pd.DataFrame:
     out = df.copy()
+
+    # Price returns
     out["ret_1d"]  = out["close"].pct_change()
     out["ret_5d"]  = out["close"].pct_change(5)
     out["ret_10d"] = out["close"].pct_change(10)
     out["ret_20d"] = out["close"].pct_change(20)
 
-    out["sma_10"] = out["close"].rolling(10).mean()
-    out["sma_20"] = out["close"].rolling(20).mean()
-    out["sma_50"] = out["close"].rolling(50).mean()
-    out["price_vs_sma20"] = out["close"] / out["sma_20"] - 1
-    out["sma10_vs_sma50"] = out["sma_10"] / out["sma_50"] - 1
+    # Lagged returns (short-term momentum / mean-reversion signals)
+    out["ret_1d_lag1"] = out["ret_1d"].shift(1)
+    out["ret_1d_lag2"] = out["ret_1d"].shift(2)
+    out["ret_1d_lag3"] = out["ret_1d"].shift(3)
 
+    # Moving averages
+    out["sma_10"]  = out["close"].rolling(10).mean()
+    out["sma_20"]  = out["close"].rolling(20).mean()
+    out["sma_50"]  = out["close"].rolling(50).mean()
+    out["sma_200"] = out["close"].rolling(200).mean()
+    out["price_vs_sma20"]  = out["close"] / out["sma_20"] - 1
+    out["sma10_vs_sma50"]  = out["sma_10"] / out["sma_50"] - 1
+    out["above_sma200"]    = (out["close"] > out["sma_200"]).astype(int)  # bull/bear regime
+
+    # Bollinger Bands
     bb_mid   = out["close"].rolling(20).mean()
     bb_std   = out["close"].rolling(20).std()
     bb_upper = bb_mid + 2 * bb_std
@@ -419,25 +422,82 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     out["bb_break_upper"] = (out["close"] > bb_upper).astype(int)
     out["bb_break_lower"] = (out["close"] < bb_lower).astype(int)
 
-    out["rsi_14"]  = compute_rsi(out["close"], 14)
+    # Oscillators
+    out["rsi_14"] = compute_rsi(out["close"], 14)
+    out["rsi_5"]  = compute_rsi(out["close"], 5)   # faster RSI for short-term moves
+
+    # Volatility
     out["atr_14"]  = compute_atr(out, 14)
     out["atr_pct"] = out["atr_14"] / out["close"]
     out["vol_20d"] = out["ret_1d"].rolling(20).std()
+    out["vol_5d"]  = out["ret_1d"].rolling(5).std()
 
-    out["vol_chg_5d"]  = out["volume"].pct_change(5)
+    # Volume
+    out["vol_chg_5d"]   = out["volume"].pct_change(5)
     out["vol_ratio_20"] = out["volume"] / out["volume"].rolling(20).mean()
+    out["vol_spike"]    = (out["vol_ratio_20"] > 2.0).astype(int)  # unusual volume
 
-    out["future_ret_1d"] = out["close"].pct_change().shift(-1)
-    out["target"] = (out["future_ret_1d"] > 0).astype(int)
+    # Macro: VIX
+    if vix is not None:
+        out = out.join(vix, how="left")
+        out["vix"] = out["vix"].ffill()
+        out["vix_chg_5d"]  = out["vix"].pct_change(5)
+        out["vix_ma10"]    = out["vix"].rolling(10).mean()
+        out["vix_vs_ma"]   = out["vix"] / out["vix_ma10"] - 1   # VIX spike vs its own avg
+        out["vix_high"]    = (out["vix"] > 25).astype(int)       # elevated fear regime
+        out["vix_extreme"] = (out["vix"] > 35).astype(int)       # panic regime
+    else:
+        for col in ["vix", "vix_chg_5d", "vix_ma10", "vix_vs_ma", "vix_high", "vix_extreme"]:
+            out[col] = np.nan
+
+    # Macro: Yield Spread
+    if spread is not None:
+        out = out.join(spread, how="left")
+        out["yield_spread"] = out["yield_spread"].ffill()
+        out["inverted"]     = (out["yield_spread"] < 0).astype(int)  # inverted = recession risk
+    else:
+        out["yield_spread"] = np.nan
+        out["inverted"]     = np.nan
+
+    # Target: 5-day forward return (more stable signal than 1-day)
+    out["future_ret_5d"] = out["close"].pct_change(5).shift(-5)
+    out["target"] = (out["future_ret_5d"] > 0).astype(int)
+
     return out
 
 
 FEATURE_COLS = [
+    # Returns
     "ret_5d", "ret_10d", "ret_20d",
-    "price_vs_sma20", "sma10_vs_sma50",
+    "ret_1d_lag1", "ret_1d_lag2", "ret_1d_lag3",
+    # Trend
+    "price_vs_sma20", "sma10_vs_sma50", "above_sma200",
+    # Bollinger Bands
     "bb_width", "bb_zscore", "bb_pos", "bb_break_upper", "bb_break_lower",
-    "rsi_14", "atr_pct", "vol_20d", "vol_chg_5d", "vol_ratio_20",
+    # Oscillators
+    "rsi_14", "rsi_5",
+    # Volatility
+    "atr_pct", "vol_20d", "vol_5d",
+    # Volume
+    "vol_chg_5d", "vol_ratio_20", "vol_spike",
+    # Macro — VIX
+    "vix", "vix_chg_5d", "vix_vs_ma", "vix_high", "vix_extreme",
+    # Macro — Yield curve
+    "yield_spread", "inverted",
 ]
+
+
+# =========================
+# REGIME FILTER
+# =========================
+def in_bad_regime(latest_row: pd.Series) -> bool:
+    """
+    Hard filter: stay out during panic or deep yield curve inversion.
+    Returns True if the bot should override the model and stay out.
+    """
+    vix_panic      = latest_row.get("vix_extreme", 0) == 1     # VIX > 35
+    deep_inversion = latest_row.get("yield_spread", 0) < -1.0  # deeply inverted curve
+    return bool(vix_panic or deep_inversion)
 
 
 # =========================
@@ -449,17 +509,32 @@ def time_split(df: pd.DataFrame, train_size: float = 0.7):
 
 
 # =========================
-# MODEL
+# MODEL — LightGBM
 # =========================
-def train_model(train_df: pd.DataFrame) -> RandomForestClassifier:
-    model = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=6,
-        min_samples_leaf=10,
+def train_model(train_df: pd.DataFrame) -> lgb.LGBMClassifier:
+    """
+    LightGBM — gradient boosting that outperforms Random Forest on
+    tabular financial data. class_weight='balanced' fixes the STAY OUT bias
+    by giving equal importance to BUY and STAY OUT training examples.
+    """
+    model = lgb.LGBMClassifier(
+        n_estimators=500,
+        learning_rate=0.03,
+        max_depth=5,
+        num_leaves=31,
+        min_child_samples=20,
+        class_weight="balanced",
         random_state=42,
         n_jobs=-1,
+        verbose=-1,
     )
-    model.fit(train_df[FEATURE_COLS], train_df["target"])
+    # Only use columns that exist and have actual data (graceful macro fallback)
+    available_cols = [
+        c for c in FEATURE_COLS
+        if c in train_df.columns and train_df[c].notna().any()
+    ]
+    model.fit(train_df[available_cols], train_df["target"])
+    model.available_cols_ = available_cols  # store for prediction
     return model
 
 
@@ -472,8 +547,8 @@ def backtest(test_df: pd.DataFrame) -> pd.DataFrame:
     bt["position_lag"] = bt["position"].shift(1).fillna(0)
     bt["turnover"]     = bt["position_lag"].diff().abs().fillna(bt["position_lag"].abs())
     bt["cost"]         = bt["turnover"] * TRANSACTION_COST
-    bt["strategy_ret"] = bt["position_lag"] * bt["future_ret_1d"] - bt["cost"]
-    bt["buy_hold_ret"] = bt["future_ret_1d"]
+    bt["strategy_ret"] = bt["position_lag"] * bt["future_ret_5d"] - bt["cost"]
+    bt["buy_hold_ret"] = bt["future_ret_5d"]
     bt["equity_curve"]   = (1 + bt["strategy_ret"]).cumprod() * INITIAL_CAPITAL
     bt["buy_hold_curve"] = (1 + bt["buy_hold_ret"]).cumprod() * INITIAL_CAPITAL
     return bt
@@ -511,38 +586,56 @@ def print_summary(bt):
 # =========================
 # SIGNAL GENERATION
 # =========================
-def generate_signal(model: RandomForestClassifier, df: pd.DataFrame) -> dict:
+def generate_signal(model: lgb.LGBMClassifier, df: pd.DataFrame) -> dict:
     """
-    Use the latest available row to generate tomorrow's signal.
-    Returns a dict with signal, probability, and key feature values.
+    Generate a 5-day outlook signal from the latest market data.
+    Applies a hard regime filter before trusting the model output.
     """
-    latest = df.dropna(subset=FEATURE_COLS).iloc[-1]
-    features = latest[FEATURE_COLS].values.reshape(1, -1)
+    available_cols = getattr(model, "available_cols_", FEATURE_COLS)
+    latest = df.dropna(subset=available_cols).iloc[-1]
+    features = latest[available_cols].values.reshape(1, -1)
     prob = model.predict_proba(features)[0, 1]
-    signal = 1 if prob >= PROB_THRESHOLD else 0
+
+    # Hard regime override
+    regime_blocked = in_bad_regime(latest)
+    if regime_blocked:
+        signal = 0
+        signal_label = "STAY OUT (Regime Filter) 🚨"
+        prob = min(prob, 0.45)
+    else:
+        signal = 1 if prob >= PROB_THRESHOLD else 0
+        signal_label = "BUY 📈" if signal == 1 else "STAY OUT 🔴"
+
+    vix_val    = latest.get("vix", np.nan)
+    spread_val = latest.get("yield_spread", np.nan)
 
     return {
         "date": str(date.today()),
         "signal": signal,
-        "signal_label": "BUY 📈" if signal == 1 else "STAY OUT 🔴",
-        "prob": round(prob, 4),
+        "signal_label": signal_label,
+        "prob": round(float(prob), 4),
         "rsi": round(float(latest["rsi_14"]), 1),
         "bb_zscore": round(float(latest["bb_zscore"]), 2),
         "price_vs_sma20": round(float(latest["price_vs_sma20"]) * 100, 2),
         "close": round(float(df["close"].iloc[-1]), 2),
+        "vix": round(float(vix_val), 1) if not np.isnan(vix_val) else "N/A",
+        "yield_spread": round(float(spread_val), 2) if not np.isnan(spread_val) else "N/A",
+        "regime_blocked": regime_blocked,
     }
 
 
 def build_telegram_message(sig: dict, prev_state: dict) -> str:
-    """Build a nicely formatted Telegram message."""
     signal_changed = prev_state["signal"] != sig["signal"]
     change_tag = "🔄 *SIGNAL CHANGED*\n" if signal_changed else ""
+    vix_str    = f"`{sig['vix']}`"           if sig["vix"] != "N/A" else "`N/A`"
+    spread_str = f"`{sig['yield_spread']}`"  if sig["yield_spread"] != "N/A" else "`N/A`"
+    regime_note = "\n⚠️ _Regime filter active — model overridden_" if sig.get("regime_blocked") else ""
 
     lines = [
         f"{change_tag}",
-        f"📊 *SPY Daily Signal — {sig['date']}*",
+        f"📊 *SPY 5-Day Signal — {sig['date']}*",
         f"",
-        f"Signal:  *{sig['signal_label']}*",
+        f"Signal:      *{sig['signal_label']}*",
         f"Confidence:  `{sig['prob']:.1%}`",
         f"",
         f"📌 *Key Indicators*",
@@ -550,8 +643,11 @@ def build_telegram_message(sig: dict, prev_state: dict) -> str:
         f"RSI (14):        `{sig['rsi']}`",
         f"BB Z-Score:      `{sig['bb_zscore']}`",
         f"vs SMA-20:       `{sig['price_vs_sma20']:+.2f}%`",
+        f"VIX:             {vix_str}",
+        f"Yield Spread:    {spread_str}",
+        f"{regime_note}",
         f"",
-        f"_Model threshold: {PROB_THRESHOLD:.0%} | Act at next day's open_",
+        f"_Model: LightGBM | Target: 5-day return | Threshold: {PROB_THRESHOLD:.0%}_",
     ]
     return "\n".join(lines)
 
@@ -566,45 +662,51 @@ def run_pipeline(backtest_mode: bool = False, force_notify: bool = False):
 
     sync_subscribers()
 
-    print("\n[1/4] Downloading data...")
+    print("\n[1/4] Downloading SPY data...")
     df = download_data(TICKER, START_DATE, END_DATE)
 
-    print("[2/4] Engineering features...")
-    df = add_features(df)
-    model_df = df.dropna(subset=FEATURE_COLS + ["target", "future_ret_1d"]).copy()
+    print("[1b/4] Downloading macro data (VIX + yield curve)...")
+    vix, spread = download_macro(START_DATE, END_DATE)
 
-    print("[3/4] Training model...")
+    print("[2/4] Engineering features...")
+    df = add_features(df, vix=vix, spread=spread)
+    model_df = df.dropna(subset=["target", "future_ret_5d"]).copy()
+
+    print("[3/4] Training LightGBM model...")
     train_df, test_df = time_split(model_df, TRAIN_SIZE)
     print(f"      Train: {train_df.index.min().date()} → {train_df.index.max().date()} ({len(train_df)} rows)")
     print(f"      Test:  {test_df.index.min().date()} → {test_df.index.max().date()} ({len(test_df)} rows)")
 
     model = train_model(train_df)
+    available_cols = model.available_cols_
 
     test_df = test_df.copy()
-    test_df["pred_prob"] = model.predict_proba(test_df[FEATURE_COLS])[:, 1]
-    test_df["pred"]      = (test_df["pred_prob"] >= 0.5).astype(int)
+    test_df["pred_prob"] = model.predict_proba(test_df[available_cols])[:, 1]
+    test_df["pred"]      = (test_df["pred_prob"] >= PROB_THRESHOLD).astype(int)
 
     if backtest_mode:
         print("\n=== Classification Report ===")
         print(classification_report(test_df["target"], test_df["pred"], digits=4))
-        importances = pd.Series(model.feature_importances_, index=FEATURE_COLS).sort_values(ascending=False)
-        print("\n=== Feature Importances ===")
-        print(importances)
+        importances = pd.Series(model.feature_importances_, index=available_cols).sort_values(ascending=False)
+        print("\n=== Top Feature Importances ===")
+        print(importances.head(15))
         bt = backtest(test_df)
         print_summary(bt)
-        bt[["close","future_ret_1d","target","pred_prob","pred",
-            "position","position_lag","strategy_ret","buy_hold_ret",
-            "equity_curve","buy_hold_curve"]].to_csv("ml_trading_backtest_results.csv")
+        bt[["close", "future_ret_5d", "target", "pred_prob", "pred",
+            "position", "position_lag", "strategy_ret", "buy_hold_ret",
+            "equity_curve", "buy_hold_curve"]].to_csv("ml_trading_backtest_results.csv")
         print("\nSaved: ml_trading_backtest_results.csv")
 
     print("\n[4/4] Generating today's signal...")
     sig = generate_signal(model, df)
     prev_state = load_last_state()
 
+    vix_display = f"{sig['vix']}" if sig["vix"] != "N/A" else "N/A"
     print(f"\n  ┌─────────────────────────────┐")
     print(f"  │  Signal:  {sig['signal_label']:<20}│")
     print(f"  │  Prob:    {sig['prob']:<20.1%} │")
     print(f"  │  RSI:     {sig['rsi']:<20} │")
+    print(f"  │  VIX:     {vix_display:<20} │")
     print(f"  │  Close:   ${sig['close']:<19} │")
     print(f"  └─────────────────────────────┘")
 
@@ -614,7 +716,7 @@ def run_pipeline(backtest_mode: bool = False, force_notify: bool = False):
     if signal_changed or force_notify or not already_alerted_today:
         msg = build_telegram_message(sig, prev_state)
         broadcast_telegram(msg)
-        save_state(sig["signal"], sig["prob"],sig)
+        save_state(sig["signal"], sig["prob"], sig)
     else:
         print(f"\n[Telegram] Signal unchanged ({sig['signal_label']}) — no alert sent.")
 
@@ -637,18 +739,18 @@ if __name__ == "__main__":
         run_pipeline(force_notify=True)
     else:
         print("Bot started. Running continuous loop with time check...")
-    
+
         def get_last_run_date():
             return sb_get("last_run_date")
-    
+
         def set_last_run_date(d):
             sb_set("last_run_date", d)
-    
+
         while True:
             try:
                 now = datetime.utcnow()
                 today = str(now.date())
-    
+
                 # 13:00 UTC = 21:00 SGT
                 if now.hour == 13:
                     if get_last_run_date() != today:
@@ -657,12 +759,10 @@ if __name__ == "__main__":
                         set_last_run_date(today)
                     else:
                         print(f"[Scheduler] Already ran today ({today})")
-    
-                # Always process Telegram commands
+
                 sync_subscribers()
-    
                 time.sleep(10)
-    
+
             except Exception as e:
                 print(f"[Main Loop Error] {e}")
                 time.sleep(5)
