@@ -16,7 +16,7 @@ import schedule
 from datetime import datetime
 from ml_trading_bot import run_pipeline
 
-DEFAULT_RUN_TIME = "21:30"  # 9:30 PM SGT = after US market close + model update
+DEFAULT_RUN_TIME = "21:00"  # 9:00 PM SGT 
 
 
 def job():
