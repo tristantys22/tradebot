@@ -27,7 +27,9 @@ def job():
         return
     print(f"[Scheduler] Running pipeline at {now.strftime('%Y-%m-%d %H:%M:%S')}")
     try:
-        run_pipeline(backtest_mode=False, force_notify=False)
+        # force_notify=True ensures the broadcast always fires at 9pm
+        # even if the signal hasn't changed from yesterday
+        run_pipeline(backtest_mode=False, force_notify=True)
     except Exception as e:
         print(f"[Scheduler] ❌ Pipeline failed: {e}")
 
