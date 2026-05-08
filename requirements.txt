@@ -5,3 +5,4 @@ numpy
 requests
 xgboost
 pandas-datareader
+schedule
