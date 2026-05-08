@@ -18,7 +18,7 @@ def scheduler_job():
         print(f"[Scheduler] ❌ Pipeline failed: {e}")
 
 # Schedule 9pm daily
-schedule.every().day.at("21:00").do(scheduler_job)
+schedule.every().day.at("13:00").do(scheduler_job)
 
 def scheduler_loop():
     while True:
