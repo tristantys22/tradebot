@@ -6,3 +6,4 @@ requests
 xgboost
 pandas-datareader
 schedule
+alpaca-py
