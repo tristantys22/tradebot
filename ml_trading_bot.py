@@ -199,7 +199,7 @@ def calculate_accuracy() -> str:
     return f"🎯 *Bot Accuracy*\n\nCorrect: {correct}/{total} predictions\nAccuracy: `{pct:.1f}%`"
 
 
-def sync_subscribers():
+def ribers():
     offset = load_update_offset()
     updates = get_updates(offset=offset)
     print(f"[Debug] offset={offset} updates_found={len(updates)}")
@@ -287,7 +287,13 @@ def sync_subscribers():
             prev_state = load_last_state()
             broadcast_telegram(build_telegram_message(sig, prev_state))
             save_state(sig["signal"], sig["prob"], sig)
-
+            
+        elif text == "/paper":
+            if chat_id != ADMIN_CHAT_ID:
+                send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
+                continue
+            send_telegram(alpaca_trader.get_status_message(), chat_id)
+            
         elif text.startswith("/broadcast"):
             if chat_id != ADMIN_CHAT_ID:
                 send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
@@ -725,6 +731,14 @@ def run_pipeline(backtest_mode: bool = False, force_notify: bool = False):
         broadcast_telegram(msg)
     else:
         print(f"\n[Telegram] Signal unchanged ({sig['signal_label']}) — no alert sent.")
+
+    # Paper trading execution — only act on signal changes, not daily reminders
+    if signal_changed and alpaca_trader.is_enabled():
+        print(f"\n[Alpaca] Signal changed — executing paper trade...")
+        status = alpaca_trader.execute_signal(sig["signal"])
+        print(f"[Alpaca] {status}")
+        # Notify admin only (not full broadcast)
+        send_telegram(f"🤖 *Paper Trading Update*\n{status}", ADMIN_CHAT_ID)
 
     return sig
 
