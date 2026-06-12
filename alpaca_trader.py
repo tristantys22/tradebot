@@ -118,10 +118,10 @@ def execute_signal(signal: int, symbol: str = "SPY") -> str:
 
     if signal == 1 and not currently_long:
         result = submit_buy(symbol)
-        return f"📈 Paper BUY {symbol} submitted." if result else "❌ Paper BUY failed."
+        return f"Paper BUY {symbol} submitted." if result else "Paper BUY failed."
     elif signal == 0 and currently_long:
         result = submit_sell_all(symbol)
-        return f"📉 Paper SELL {symbol} submitted." if result else "❌ Paper SELL failed."
+        return f"Paper SELL {symbol} submitted." if result else "Paper SELL failed."
     elif signal == 1 and currently_long:
         return f"✅ Already long {symbol}, no action."
     else:
