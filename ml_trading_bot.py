@@ -13,6 +13,7 @@ import xgboost as xgb
 from datetime import datetime, date
 from sklearn.metrics import classification_report
 from pathlib import Path
+import alpaca_trader
 
 # =========================
 # CONFIG
