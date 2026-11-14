@@ -1,0 +1,16 @@
+app = "tradebot-tristan"
+primary_region = "sin"
+
+[build]
+
+[mounts]
+  source = "tradebot_data"
+  destination = "/data"
+
+[env]
+  DATA_DIR = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
