@@ -46,11 +46,14 @@ def sb_get(key: str):
         f"{SUPABASE_URL}/rest/v1/bot_state?key=eq.{key}&select=value",
         headers=sb_headers(), timeout=10
     )
+    if r.status_code >= 300:
+        print(f"[Supabase ERROR] read key={key} status={r.status_code} response={r.text}")
+        return None
     data = r.json()
     return data[0]["value"] if data else None
 
 def sb_set(key: str, value: str):
-    url = f"{SUPABASE_URL}/rest/v1/bot_state"
+    url = f"{SUPABASE_URL}/rest/v1/bot_state?on_conflict=key"
     res = requests.post(
         url,
         headers=sb_headers(),
@@ -199,7 +202,7 @@ def calculate_accuracy() -> str:
     return f"🎯 *Bot Accuracy*\n\nCorrect: {correct}/{total} predictions\nAccuracy: `{pct:.1f}%`"
 
 
-def ribers():
+def sync_subscribers():
     offset = load_update_offset()
     updates = get_updates(offset=offset)
     print(f"[Debug] offset={offset} updates_found={len(updates)}")
@@ -293,7 +296,14 @@ def ribers():
                 send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
                 continue
             send_telegram(alpaca_trader.get_status_message(), chat_id)
-            
+
+        elif text == "/nuai":
+            if chat_id != ADMIN_CHAT_ID:
+                send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
+                continue
+            import nuai_mean_revert
+            send_telegram(nuai_mean_revert.get_status_message(), chat_id)
+
         elif text.startswith("/broadcast"):
             if chat_id != ADMIN_CHAT_ID:
                 send_telegram(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)

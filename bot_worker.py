@@ -3,6 +3,7 @@ import threading
 import schedule
 from datetime import datetime
 from ml_trading_bot import sync_subscribers, run_pipeline
+import nuai_mean_revert
 
 print("Bot worker started...")
 
@@ -17,8 +18,15 @@ def scheduler_job():
     except Exception as e:
         print(f"[Scheduler] ❌ Pipeline failed: {e}")
 
+def nuai_job():
+    try:
+        nuai_mean_revert.run_cycle()
+    except Exception as e:
+        print(f"[NUAI] ❌ Cycle failed: {e}")
+
 # Schedule 9pm daily
 schedule.every().day.at("13:00").do(scheduler_job)
+schedule.every(1).minutes.do(nuai_job)
 
 def scheduler_loop():
     while True:
