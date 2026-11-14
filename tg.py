@@ -26,6 +26,12 @@ def send(text: str, chat_id=None) -> bool:
         return False
 
 
+def call(method: str, **payload) -> dict:
+    r = requests.post(f"{_API}/{method}", json=payload, timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
 def send_admin(text: str) -> bool:
     return send(text, ADMIN_CHAT_ID)
 

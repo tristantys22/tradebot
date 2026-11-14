@@ -206,6 +206,15 @@ def accuracy_message() -> str:
             f"Accuracy: `{correct / len(pairs) * 100:.1f}%`")
 
 
+def latest_message() -> str:
+    hist = history()
+    if not hist:
+        return "No signal yet — the first one arrives at 9pm SGT on the next weekday."
+    p = hist[-1]
+    return (f"📊 *Latest SPY Signal — {p['date']}*\n\nSignal: *{p['signal']}*\nConfidence: `{p['prob']:.1%}`\n"
+            f"SPY close: `${p['close']}`\n\n_Next update: weekdays 9pm SGT_")
+
+
 def history_message() -> str:
     hist = history()
     if not hist:

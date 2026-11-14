@@ -34,11 +34,22 @@ def _scheduler():
         time.sleep(1)
 
 
-HELP = ("📋 *Available Commands:*\n"
-        "/start — Subscribe to daily alerts\n"
-        "/stop — Unsubscribe from alerts\n"
-        "/history — View the last 5 predictions\n"
-        "/accuracy — See the bot's prediction accuracy\n")
+ABOUT = ("🤖 *Tristan's SPY ML Bot*\n\n"
+         "Every weekday at *9pm SGT* I send a 5-day outlook for SPY (the S&P 500 ETF): "
+         "*BUY* or *STAY OUT*, with the model's confidence.\n\n"
+         "I only understand the commands below — normal chat messages won't get a reply.")
+
+
+def _help_text(chat_id) -> str:
+    lines = [ABOUT, "", "📋 *Commands*"] + [f"/{name} — {desc}" for name, (desc, _) in PUBLIC.items()]
+    if chat_id == tg.ADMIN_CHAT_ID:
+        lines += ["", "🔐 *Admin*"] + [f"/{name} — {desc}" for name, (desc, _) in ADMIN.items()]
+    return "\n".join(lines)
+
+
+def _start(chat_id, _):
+    tg.add_subscriber(chat_id)
+    tg.send("✅ *Subscribed!* You'll get the SPY signal every weekday at 9pm SGT.\n\n" + _help_text(chat_id), chat_id)
 
 
 def _broadcast(chat_id, arg):
@@ -49,22 +60,37 @@ def _broadcast(chat_id, arg):
 
 
 def _force(chat_id, _):
-    tg.send("⚡ Forcing prediction...", chat_id)
+    tg.send("⚡ Running the model now — this takes about a minute...", chat_id)
     spy_model.run_daily(force_notify=True)
 
 
 PUBLIC = {
-    "/start": lambda c, _: (tg.add_subscriber(c), tg.send(f"✅ *Subscribed to Tristan's SPY ML Bot!*\n\n{HELP}", c)),
-    "/stop": lambda c, _: (tg.remove_subscriber(c), tg.send("You have been unsubscribed from me. I hate you.", c)),
-    "/history": lambda c, _: tg.send(spy_model.history_message(), c),
-    "/accuracy": lambda c, _: tg.send(spy_model.accuracy_message(), c),
+    "start": ("Subscribe to the daily signal", _start),
+    "signal": ("Latest SPY signal", lambda c, _: tg.send(spy_model.latest_message(), c)),
+    "history": ("Last 5 predictions", lambda c, _: tg.send(spy_model.history_message(), c)),
+    "accuracy": ("How often the bot was right", lambda c, _: tg.send(spy_model.accuracy_message(), c)),
+    "help": ("What this bot does + commands", lambda c, _: tg.send(_help_text(c), c)),
+    "stop": ("Unsubscribe", lambda c, _: (tg.remove_subscriber(c), tg.send(
+        "👋 Unsubscribed — you won't get daily signals anymore. Send /start to come back.", c))),
 }
 ADMIN = {
-    "/force": _force,
-    "/paper": lambda c, _: tg.send(spy_model.paper_status_message(), c),
-    "/nuai": lambda c, _: tg.send(nuai.status_message(), c),
-    "/broadcast": _broadcast,
+    "paper": ("Alpaca paper account + SPY position", lambda c, _: tg.send(spy_model.paper_status_message(), c)),
+    "nuai": ("NUAI mean-reversion status", lambda c, _: tg.send(nuai.status_message(), c)),
+    "force": ("Run the SPY model now and broadcast", _force),
+    "broadcast": ("Message every subscriber", _broadcast),
 }
+
+
+def register_commands():
+    """Fills Telegram's '/' menu and the intro text people see before pressing Start."""
+    tg.call("setMyCommands", commands=[{"command": n, "description": d} for n, (d, _) in PUBLIC.items()])
+    tg.call("setMyCommands", scope={"type": "chat", "chat_id": int(tg.ADMIN_CHAT_ID)},
+            commands=[{"command": n, "description": d} for n, (d, _) in (PUBLIC | ADMIN).items()])
+    tg.call("setMyShortDescription", short_description="Daily SPY buy/stay-out signal from an ML model. Send /start.")
+    tg.call("setMyDescription", description=(
+        "Every weekday at 9pm SGT this bot sends a 5-day outlook for SPY (S&P 500 ETF) — BUY or STAY OUT — "
+        "from an XGBoost model.\n\nPress Start to subscribe. The bot only answers commands "
+        "(/signal, /history, /accuracy, /help, /stop), not normal chat messages."))
 
 
 def handle_update(update: dict):
@@ -75,29 +101,39 @@ def handle_update(update: dict):
         if status == "member":
             tg.add_subscriber(group_id)
             tg.send(f"👋 Thanks for adding me to *{chat.get('title', 'this group')}*!\n\n"
-                    f"I'll send daily SPY signals here automatically.\n\n{HELP}", group_id)
+                    f"I'll post the SPY signal here every weekday at 9pm SGT.\n\n{_help_text(group_id)}", group_id)
         elif status in ("kicked", "left"):
             tg.remove_subscriber(group_id)
 
     msg = update.get("message") or {}
-    text = (msg.get("text") or "").strip()
-    if not text.startswith("/") or "chat" not in msg:
+    if "chat" not in msg:
         return
-    chat_id = str(msg["chat"]["id"])
+    chat_id, private = str(msg["chat"]["id"]), msg["chat"].get("type") == "private"
+    text = (msg.get("text") or "").strip()
+    if not text.startswith("/"):
+        if private:  # in groups, stay quiet on normal chatter
+            tg.send("🤔 I only respond to commands.\n\n" + _help_text(chat_id), chat_id)
+        return
     command, _, arg = text.partition(" ")
-    command = command.split("@")[0].lower()  # "/start@MyBot" in groups
-    print(f"[Telegram] {command} from {chat_id}")
+    command = command[1:].split("@")[0].lower()  # "/start@MyBot" in groups
+    print(f"[Telegram] /{command} from {chat_id}")
 
     if command in PUBLIC:
-        PUBLIC[command](chat_id, arg.strip())
+        PUBLIC[command][1](chat_id, arg.strip())
     elif command in ADMIN:
         if chat_id != tg.ADMIN_CHAT_ID:
-            tg.send(f"❌ You are not authorized. Your chat_id is {chat_id}", chat_id)
+            tg.send("🔐 That command is admin-only. Send /help to see what you can use.", chat_id)
         else:
-            ADMIN[command](chat_id, arg.strip())
+            ADMIN[command][1](chat_id, arg.strip())
+    elif private:
+        tg.send(f"❓ I don't know /{command}.\n\n" + _help_text(chat_id), chat_id)
 
 
 if __name__ == "__main__":
     print("Bot worker started")
+    try:
+        register_commands()
+    except Exception as e:
+        print(f"[Telegram] ⚠️ could not register command menu: {e}")
     threading.Thread(target=_scheduler, daemon=True).start()
     tg.poll_forever(handle_update)
