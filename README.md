@@ -11,7 +11,9 @@ Telegram trading bot on Fly.io (`tradebot-tristan`) with Alpaca paper trading an
 | `tg.py` | Telegram send / broadcast / subscribers / polling |
 | `store.py` | Supabase `bot_state` key/value store |
 
-Commands: `/start` `/stop` `/history` `/accuracy`; admin: `/force` `/paper` `/nuai` `/broadcast <msg>`.
+Commands: `/start` `/signal` `/history` `/accuracy` `/help` `/stop`; admin: `/paper` `/nuai` `/force` `/broadcast <msg>`.
+
+Developer and AI-assistant notes (architecture, testing, research history): see [CLAUDE.md](CLAUDE.md).
 
 Secrets (`fly secrets set`): `TELEGRAM_BOT_TOKEN`, `SUPABASE_URL`, `SUPABASE_KEY`,
 `ALPACA_API_KEY`, `ALPACA_SECRET`, `ALPACA_PAPER_ENABLED=true`.
