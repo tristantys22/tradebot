@@ -4,9 +4,9 @@ Telegram trading bot on Fly.io (`tradebot-tristan`) with Alpaca paper trading an
 
 | File | What it does |
 |---|---|
-| `bot_worker.py` | Entry point: Telegram commands + schedule (SPY daily 13:00 UTC, NUAI every minute) |
+| `bot_worker.py` | Entry point: Telegram commands + schedule (SPY + NUAI daily at 13:00 UTC, before the US open) |
 | `spy_strategy.py` | SPY trend + vol target / RSI(2) dip strategy: signal, broadcast, rebalance |
-| `nuai_mean_revert.py` | NUAI intraday mean reversion on 5-min bars |
+| `nuai_swing.py` | NUAI daily swing model (XGBoost, 3-day horizon, long only, 20% of equity) |
 | `broker.py` | Alpaca REST client |
 | `tg.py` | Telegram send / broadcast / subscribers / polling |
 | `store.py` | Supabase `bot_state` key/value store |

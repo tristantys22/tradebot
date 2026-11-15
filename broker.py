@@ -35,6 +35,13 @@ def has_open_order(symbol: str) -> bool:
     return bool(api("GET", "/v2/orders", params={"status": "open", "symbols": symbol}))
 
 
+def free_cash() -> float:
+    """Cash not already committed to open buy orders (orders queued before the open haven't settled)."""
+    committed = sum(float(o.get("notional") or 0) for o in api("GET", "/v2/orders", params={"status": "open"}) or []
+                    if o["side"] == "buy")
+    return max(float(account()["cash"]) - committed, 0.0)
+
+
 def cancel_open_orders(symbol: str):
     for order in api("GET", "/v2/orders", params={"status": "open", "symbols": symbol}) or []:
         api("DELETE", f"/v2/orders/{order['id']}")

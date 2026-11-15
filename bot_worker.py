@@ -5,11 +5,11 @@ from datetime import datetime
 
 import schedule
 
-import nuai_mean_revert as nuai
+import nuai_swing as nuai
 import spy_strategy as spy
 import tg
 
-SPY_RUN_UTC = "13:00"  # 21:00 SGT
+DAILY_RUN_UTC = "13:00"  # 21:00 SGT, before the US open
 
 
 def _safe(name, fn):
@@ -18,17 +18,19 @@ def _safe(name, fn):
             fn()
         except Exception as e:
             print(f"[{name}] ❌ failed: {e}")
+            tg.send_admin(f"❌ *{name} daily run failed*\n`{e}`")
     return run
 
 
-def spy_job():
-    if datetime.utcnow().weekday() < 5:
-        spy.run_daily(force_notify=True)
+def daily_job():
+    if datetime.utcnow().weekday() >= 5:
+        return
+    _safe("SPY", lambda: spy.run_daily(force_notify=True))()
+    _safe("NUAI", nuai.run_daily)()  # after SPY so it sees SPY's queued buy when checking free cash
 
 
 def _scheduler():
-    schedule.every().day.at(SPY_RUN_UTC).do(_safe("SPY", spy_job))
-    schedule.every().minute.do(_safe("NUAI", nuai.run_cycle))
+    schedule.every().day.at(DAILY_RUN_UTC).do(daily_job)
     while True:
         schedule.run_pending()
         time.sleep(1)
@@ -75,7 +77,7 @@ PUBLIC = {
 }
 ADMIN = {
     "paper": ("Alpaca paper account + SPY position", lambda c, _: tg.send(spy.paper_status_message(), c)),
-    "nuai": ("NUAI mean-reversion status", lambda c, _: tg.send(nuai.status_message(), c)),
+    "nuai": ("NUAI swing model status", lambda c, _: tg.send(nuai.status_message(), c)),
     "force": ("Run the SPY strategy now and broadcast", _force),
     "broadcast": ("Message every subscriber", _broadcast),
 }

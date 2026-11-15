@@ -24,7 +24,7 @@ VOL_WINDOW = 20
 DIP_ENTRY_RSI = 10           # RSI(2) below this, in an uptrend, opens the dip half
 DIP_EXIT_SMA = 5             # dip half closes once price is back above this average
 TREND_WEIGHT = 0.5           # the dip half gets the rest
-SPY_ALLOCATION = 0.90        # share of account equity SPY may use (NUAI uses up to 10%)
+SPY_ALLOCATION = 0.80        # share of account equity SPY may use (NUAI swing uses up to 20%)
 REBALANCE_BAND = 0.05        # skip trades smaller than this share of the SPY allocation
 HISTORY_LIMIT = 1000
 
@@ -169,7 +169,7 @@ def rebalance(weight: float, last_close: float) -> str:
         sell = min(qty, round((current - target) / price, 4))
         broker.market_order(TICKER, "sell", qty=sell)
         return f"📉 SELL {sell:g} {TICKER} → target {weight:.0%} (${target:,.0f})."
-    buy = round(min(target - current, max(float(acct["cash"]), 0) * 0.99), 2)
+    buy = round(min(target - current, broker.free_cash() * 0.99), 2)
     if buy < 1:
         return "⚠️ Wanted to buy but there is no free cash."
     broker.market_order(TICKER, "buy", notional=buy)

@@ -2,4 +2,5 @@ numpy==2.4.6
 pandas==3.1.1
 requests==2.34.2
 schedule==1.2.2
+xgboost-cpu==3.2.0
 yfinance==1.8.0
