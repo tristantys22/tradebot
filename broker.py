@@ -35,6 +35,11 @@ def has_open_order(symbol: str) -> bool:
     return bool(api("GET", "/v2/orders", params={"status": "open", "symbols": symbol}))
 
 
+def cancel_open_orders(symbol: str):
+    for order in api("GET", "/v2/orders", params={"status": "open", "symbols": symbol}) or []:
+        api("DELETE", f"/v2/orders/{order['id']}")
+
+
 def market_order(symbol: str, side: str, qty: int = None, notional: float = None) -> dict:
     order = {"symbol": symbol, "side": side, "type": "market", "time_in_force": "day"}
     order.update({"qty": str(qty)} if qty is not None else {"notional": str(notional)})

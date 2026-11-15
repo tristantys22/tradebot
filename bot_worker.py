@@ -6,7 +6,7 @@ from datetime import datetime
 import schedule
 
 import nuai_mean_revert as nuai
-import spy_model
+import spy_strategy as spy
 import tg
 
 SPY_RUN_UTC = "13:00"  # 21:00 SGT
@@ -23,7 +23,7 @@ def _safe(name, fn):
 
 def spy_job():
     if datetime.utcnow().weekday() < 5:
-        spy_model.run_daily(force_notify=True)
+        spy.run_daily(force_notify=True)
 
 
 def _scheduler():
@@ -34,9 +34,10 @@ def _scheduler():
         time.sleep(1)
 
 
-ABOUT = ("🤖 *Tristan's SPY ML Bot*\n\n"
-         "Every weekday at *9pm SGT* I send a 5-day outlook for SPY (the S&P 500 ETF): "
-         "*BUY* or *STAY OUT*, with the model's confidence.\n\n"
+ABOUT = ("🤖 *Tristan's SPY Bot*\n\n"
+         "Every weekday at *9pm SGT* I send how much of a portfolio should be in SPY (the S&P 500 ETF), "
+         "from 0% to 100%. Half follows the long-term trend (sized down when markets are volatile), "
+         "half buys short dips during uptrends.\n\n"
          "I only understand the commands below — normal chat messages won't get a reply.")
 
 
@@ -51,7 +52,6 @@ def _start(chat_id, _):
     tg.add_subscriber(chat_id)
     tg.send("✅ *Subscribed!* You'll get the SPY signal every weekday at 9pm SGT.\n\n" + _help_text(chat_id), chat_id)
 
-
 def _broadcast(chat_id, arg):
     if not arg:
         return tg.send("Usage: /broadcast your message here", chat_id)
@@ -60,23 +60,23 @@ def _broadcast(chat_id, arg):
 
 
 def _force(chat_id, _):
-    tg.send("⚡ Running the model now — this takes about a minute...", chat_id)
-    spy_model.run_daily(force_notify=True)
+    tg.send("⚡ Running the SPY strategy now...", chat_id)
+    spy.run_daily(force_notify=True)
 
 
 PUBLIC = {
     "start": ("Subscribe to the daily signal", _start),
-    "signal": ("Latest SPY signal", lambda c, _: tg.send(spy_model.latest_message(), c)),
-    "history": ("Last 5 predictions", lambda c, _: tg.send(spy_model.history_message(), c)),
-    "accuracy": ("How often the bot was right", lambda c, _: tg.send(spy_model.accuracy_message(), c)),
+    "signal": ("Latest SPY signal", lambda c, _: tg.send(spy.latest_message(), c)),
+    "history": ("Last 5 signals", lambda c, _: tg.send(spy.history_message(), c)),
+    "accuracy": ("How often the bot was right", lambda c, _: tg.send(spy.accuracy_message(), c)),
     "help": ("What this bot does + commands", lambda c, _: tg.send(_help_text(c), c)),
     "stop": ("Unsubscribe", lambda c, _: (tg.remove_subscriber(c), tg.send(
         "👋 Unsubscribed — you won't get daily signals anymore. Send /start to come back.", c))),
 }
 ADMIN = {
-    "paper": ("Alpaca paper account + SPY position", lambda c, _: tg.send(spy_model.paper_status_message(), c)),
+    "paper": ("Alpaca paper account + SPY position", lambda c, _: tg.send(spy.paper_status_message(), c)),
     "nuai": ("NUAI mean-reversion status", lambda c, _: tg.send(nuai.status_message(), c)),
-    "force": ("Run the SPY model now and broadcast", _force),
+    "force": ("Run the SPY strategy now and broadcast", _force),
     "broadcast": ("Message every subscriber", _broadcast),
 }
 
@@ -86,10 +86,11 @@ def register_commands():
     tg.call("setMyCommands", commands=[{"command": n, "description": d} for n, (d, _) in PUBLIC.items()])
     tg.call("setMyCommands", scope={"type": "chat", "chat_id": int(tg.ADMIN_CHAT_ID)},
             commands=[{"command": n, "description": d} for n, (d, _) in (PUBLIC | ADMIN).items()])
-    tg.call("setMyShortDescription", short_description="Daily SPY buy/stay-out signal from an ML model. Send /start.")
+    tg.call("setMyShortDescription", short_description="Daily SPY position signal (trend + dip-buying). Send /start.")
     tg.call("setMyDescription", description=(
-        "Every weekday at 9pm SGT this bot sends a 5-day outlook for SPY (S&P 500 ETF) — BUY or STAY OUT — "
-        "from an XGBoost model.\n\nPress Start to subscribe. The bot only answers commands "
+        "Every weekday at 9pm SGT this bot sends how much of a portfolio should be in SPY (S&P 500 ETF), from 0% to "
+        "100% — half trend-following with a volatility target, half RSI(2) dip-buying.\n\n"
+        "Press Start to subscribe. The bot only answers commands "
         "(/signal, /history, /accuracy, /help, /stop), not normal chat messages."))
 
 
